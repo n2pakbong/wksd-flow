@@ -7,8 +7,14 @@ automatic differentiation, so no fourth-order derivative is ever hand-coded.
 from functools import partial
 import jax
 import jax.numpy as jnp
+jax.config.update("jax_enable_x64", True)
 
 # ---------- base kernels: (d,), (d,) -> scalar ----------
+# All base kernels below are smooth functions of u = |x-y|^2, which matters:
+# k_pi is a FOURTH derivative of kbar, so any kernel built from sqrt(u) is
+# singular under autodiff on the diagonal x = y, exactly where the V-statistic
+# evaluates it. Matern kernels are therefore excluded from the numerics even
+# though Proposition (admissible class) covers them.
 
 def gaussian(x, y, ell=1.0):
     return jnp.exp(-jnp.sum((x - y) ** 2) / (2.0 * ell ** 2))
@@ -16,14 +22,10 @@ def gaussian(x, y, ell=1.0):
 def imq(x, y, ell=1.0, beta=-0.5):
     return (1.0 + jnp.sum((x - y) ** 2) / ell ** 2) ** beta
 
-def matern72(x, y, ell=1.0):
-    # nu = 7/2, C^6, so admissible for kappa_0, kappa_1 (see Prop. admissible_class)
-    r = jnp.sqrt(jnp.sum((x - y) ** 2) + 1e-12)
-    s = jnp.sqrt(7.0) * r / ell
-    poly = 1.0 + s + 2.0 * s ** 2 / 5.0 + s ** 3 / 15.0
-    return poly * jnp.exp(-s)
+def rational_quadratic(x, y, ell=1.0, a=2.0):
+    return (1.0 + jnp.sum((x - y) ** 2) / (2.0 * a * ell ** 2)) ** (-a)
 
-BASE_KERNELS = {"gaussian": gaussian, "imq": imq, "matern72": matern72}
+BASE_KERNELS = {"gaussian": gaussian, "imq": imq, "rq": rational_quadratic}
 
 
 def make_weighted(kbar, s=0.0):
@@ -69,7 +71,7 @@ def pairwise(f):
     return jax.vmap(jax.vmap(f, in_axes=(None, 0)), in_axes=(0, None))
 
 
-def make_kernel_bundle(base="matern72", s=0.0, base_kwargs=None,
+def make_kernel_bundle(base="imq", s=0.0, base_kwargs=None,
                        grad_V=None, eps=1.0):
     """Everything the flows need: k_pi, grad_x k_pi, and their vectorizations."""
     base_kwargs = base_kwargs or {}
