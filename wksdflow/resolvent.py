@@ -33,46 +33,43 @@ def make_collocation_solver(q, grad_V, eps, alpha, gamma):
 
 
 def make_semigroup_solver(k_pi_fn, grad_V, eps, alpha, n_traj=8, n_steps=200, dt=None):
-    """Estimate grad R_alpha h_mu by pathwise differentiation of the semigroup.
+    """Estimate grad R_alpha h_mu at the particles without any linear algebra.
 
-    We use grad_x E[h(X_t^x)] = E[J_t^T grad h(X_t^x)] with J_t the Jacobian of
-    the Euler-Maruyama flow, which is exactly the identity used in the proof of
-    Lemma lem_resolvent_estimates. Trajectories are truncated at time
-    T = n_steps * dt and weighted by exp(-alpha t) dt.
+    Uses grad_x E[h(X_t^x)] = E[J_t^T grad h(X_t^x)], the same identity as in the
+    proof of the resolvent estimates, with J_t the Jacobian of the Euler-Maruyama
+    flow, and a left-point Riemann sum for int_0^T exp(-alpha t) (...) dt.
+    Truncation at T = n_steps * dt biases the estimate by O(exp(-(alpha+rho) T)),
+    so take alpha * T >> 1 or rho * T >> 1.
     """
     if dt is None:
         dt = 0.5 / max(alpha, 1.0)
+    sq = jnp.sqrt(2.0) * eps * jnp.sqrt(dt)
 
     def grad_h(x, Xp):
-        # grad_x (1/N) sum_j k_pi(x, X_j)
         g = jax.vmap(jax.grad(k_pi_fn, argnums=0), in_axes=(None, 0))(x, Xp)
         return jnp.mean(g, axis=0)
+
+    def one_path(x0, Xp, noise):
+        def step(carry, z):
+            x, J, acc, t = carry
+            acc = acc + jnp.exp(-alpha * t) * (J.T @ grad_h(x, Xp)) * dt
+            HV = jax.jacfwd(grad_V)(x)
+            x_new = x - grad_V(x) * dt + sq * z
+            J_new = J - (HV @ J) * dt
+            return (x_new, J_new, acc, t + dt), None
+        d = x0.shape[0]
+        init = (x0, jnp.eye(d), jnp.zeros(d), 0.0)
+        (_, _, acc, _), _ = jax.lax.scan(step, init, noise)
+        return acc
 
     @jax.jit
     def psi_grad(Xp, key):
         N, d = Xp.shape
-
-        def one_path(x0, subkey):
-            noise = jax.random.normal(subkey, (n_steps, d))
-
-            def step(carry, inp):
-                x, J, acc, t = carry
-                z = inp
-                acc = acc + jnp.exp(-alpha * t) * (J.T @ grad_h(x, Xp)) * dt
-                Hv = jax.hessian(lambda z_: jnp.sum(grad_V(z_)))  # unused placeholder
-                x_new = x - grad_V(x) * dt + jnp.sqrt(2.0) * eps * jnp.sqrt(dt) * z
-                HV = jax.jacfwd(grad_V)(x)
-                J_new = J - HV @ J * dt
-                return (x_new, J_new, acc, t + dt), None
-
-            init = (x0, jnp.eye(d), jnp.zeros(d), 0.0)
-            (_, _, acc, _), _ = jax.lax.scan(step, init, noise)
-            return acc
-
-        keys = jax.random.split(key, N * n_traj).reshape(N, n_traj, 2)
-        per_particle = jax.vmap(
-            lambda x, ks: jnp.mean(jax.vmap(one_path, in_axes=(None, 0))(x, ks), axis=0)
-        )(Xp, keys)
-        return per_particle
+        noise = jax.random.normal(key, (N, n_traj, n_steps, d))
+        per_traj = jax.vmap(                        # over particles
+            jax.vmap(one_path, in_axes=(None, None, 0)),  # over trajectories
+            in_axes=(0, None, 0),
+        )(Xp, Xp, noise)
+        return jnp.mean(per_traj, axis=1)
 
     return psi_grad
