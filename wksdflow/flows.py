@@ -37,16 +37,26 @@ def generator_velocity(bundle, psi_grad, stochastic=False):
     return v
 
 
-def integrate(v, X0, eta, n_steps, key=None, callback=None, stochastic=False):
-    """Explicit Euler, exactly the update analyzed in Theorem thm:end_to_end."""
-    X = X0
-    hist = []
+def integrate(v, X0, eta, n_steps, key=None, monitor=None, callback=None,
+              stochastic=False):
+    """Explicit Euler, the update analyzed in the end-to-end theorem.
+
+    If `monitor` is given it is called as monitor(X) and must return the value of
+    the objective. The configuration achieving the smallest monitored value is
+    returned as well, which is the quantity the end-to-end bound controls.
+    """
+    X, hist = X0, []
+    best_val, best_X, best_n = jnp.inf, X0, 0
     for n in range(n_steps):
         if stochastic:
             key, sub = jax.random.split(key)
             X = X + eta * v(X, sub)
         else:
             X = X + eta * v(X)
+        if monitor is not None:
+            val = float(monitor(X))
+            if val < best_val:
+                best_val, best_X, best_n = val, X, n + 1
         if callback is not None:
             hist.append(callback(n, X))
-    return X, hist
+    return X, hist, (best_X, best_val, best_n)
