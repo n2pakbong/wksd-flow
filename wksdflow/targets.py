@@ -1,67 +1,43 @@
-"""Targets: V, grad V, and (where available) exact samples and KL."""
-import jax
-import jax.numpy as jnp
+import jax, jax.numpy as jnp
+from collections import namedtuple
+jax.config.update("jax_enable_x64", True)
 
+Target = namedtuple("Target", "dim eps V grad_V rho sample log_pi")
 
-class Target:
-    def __init__(self, V, dim, eps=1.0, name="target", rho=None, exact_sample=None):
-        self.V = V
-        self.dim = dim
-        self.eps = eps
-        self.name = name
-        self.rho = rho                       # semiconvexity constant, if known
-        self.grad_V = jax.jit(jax.grad(V))
-        self._exact_sample = exact_sample
+def gaussian_target(dim=2, eps=1.0):
+    V = lambda x: 0.5 * jnp.sum(x ** 2)
+    logZ = 0.5 * dim * jnp.log(2.0 * jnp.pi * eps ** 2)
+    return Target(dim, eps, V, jax.grad(V), 1.0,
+                  lambda key, n: eps * jax.random.normal(key, (n, dim)),
+                  lambda X: -jax.vmap(V)(X) / eps ** 2 - logZ)
 
-    def sample(self, key, n):
-        if self._exact_sample is None:
-            raise NotImplementedError
-        return self._exact_sample(key, n)
-
-
-def gaussian_target(dim=1, eps=1.0, scale=1.0):
-    """pi = N(0, eps^2 scale^2 I) since V = |x|^2/(2 scale^2)."""
+def mixture_target(dim=2, eps=1.0, sep=1.5):
+    """pi = 1/2 N(-m, eps^2 I) + 1/2 N(+m, eps^2 I), m = sep * e_1.
+    Along the separation axis nabla^2 V = I - (sep^2/eps^2) sech^2(<x,m>/eps^2)
+    times the projector onto m, so rho = 1 - sep^2/eps^2, which is negative
+    as soon as sep > eps."""
+    m = jnp.zeros(dim).at[0].set(sep)
     def V(x):
-        return 0.5 * jnp.sum(x ** 2) / scale ** 2
-
-    def exact(key, n):
-        return eps * scale * jax.random.normal(key, (n, dim))
-
-    return Target(V, dim, eps, f"gaussian{dim}d", rho=1.0 / scale ** 2, exact_sample=exact)
-
-
-def mixture_target(dim=2, eps=1.0, sep=2.0, w=0.5):
-    """Bimodal, non-log-concave: rho < 0, so alpha > -2 rho is needed."""
-    mu1 = jnp.concatenate([jnp.array([sep]), jnp.zeros(dim - 1)])
-    mu2 = -mu1
-
-    def V(x):
-        a = -0.5 * jnp.sum((x - mu1) ** 2) / eps ** 2 + jnp.log(w)
-        b = -0.5 * jnp.sum((x - mu2) ** 2) / eps ** 2 + jnp.log(1 - w)
-        return -eps ** 2 * jax.scipy.special.logsumexp(jnp.array([a, b]))
-
-    def exact(key, n):
+        q = 0.5 * jnp.sum((x - m) ** 2)
+        r = 0.5 * jnp.sum((x + m) ** 2)
+        return -eps ** 2 * jax.nn.logsumexp(
+            jnp.array([-q / eps ** 2, -r / eps ** 2]))
+    def sample(key, n):
         k1, k2 = jax.random.split(key)
-        z = jax.random.bernoulli(k1, w, (n, 1))
-        x = eps * jax.random.normal(k2, (n, dim))
-        return x + jnp.where(z, mu1, mu2)
+        sgn = 2.0 * jax.random.bernoulli(k1, 0.5, (n, 1)) - 1.0
+        return sgn * m + eps * jax.random.normal(k2, (n, dim))
+    return Target(dim, eps, V, jax.grad(V), 1.0 - sep ** 2 / eps ** 2,
+                  sample, lambda X: -jax.vmap(V)(X) / eps ** 2)
 
-    # crude lower bound on the Hessian for a well-separated mixture
-    return Target(V, dim, eps, f"mixture{dim}d", rho=-(sep ** 2) / eps ** 2,
-                  exact_sample=exact)
-
-
-def logistic_posterior(key, dim=10, n_data=200, eps=1.0, prior_var=1.0):
-    """Log-concave posterior: V = -log lik - log prior. rho >= 1/prior_var."""
-    kx, kt, ky = jax.random.split(key, 3)
+def logistic_posterior(key, dim=5, n_data=100, eps=1.0, scale=1.0):
+    kx, ky = jax.random.split(key)
     X = jax.random.normal(kx, (n_data, dim))
-    theta_true = jax.random.normal(kt, (dim,))
-    p = jax.nn.sigmoid(X @ theta_true)
-    y = jax.random.bernoulli(ky, p).astype(jnp.float32)
-
+    theta = jnp.ones(dim) / jnp.sqrt(dim)
+    p = jax.nn.sigmoid(X @ theta)
+    y = jax.random.bernoulli(ky, p).astype(X.dtype)
     def V(t):
         z = X @ t
-        nll = jnp.sum(jnp.logaddexp(0.0, z) - y * z)
-        return eps ** 2 * (nll + 0.5 * jnp.sum(t ** 2) / prior_var)
-
-    return Target(V, dim, eps, f"logistic{dim}d", rho=1.0 / prior_var)
+        return eps ** 2 * (jnp.sum(jax.nn.softplus(z) - y * z)
+                           + 0.5 * jnp.sum(t ** 2) / scale ** 2)
+    return Target(dim, eps, V, jax.grad(V), eps ** 2 / scale ** 2, None,
+                  lambda T: -jax.vmap(V)(T) / eps ** 2)
