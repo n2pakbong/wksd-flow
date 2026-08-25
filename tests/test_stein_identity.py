@@ -16,5 +16,4 @@ def test_diagonal_positive():
     tgt = gaussian_target(dim=2, eps=1.0)
     b = make_kernel_bundle("imq", s=0.0, grad_V=tgt.grad_V, eps=1.0)
     X = jax.random.normal(jax.random.PRNGKey(1), (50, 2))
-    diag = jax.vmap(lambda x: b["k_pi"](x, x))(X)
-    assert jnp.all(diag > 0)          # k_pi(x,x) = ||Phi(x)||^2 > 0
+    assert jnp.all(jax.vmap(lambda x: b["k_pi"](x, x))(X) > 0)
