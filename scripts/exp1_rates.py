@@ -9,7 +9,7 @@ import jax, jax.numpy as jnp, numpy as np
 import matplotlib.pyplot as plt
 import os
 os.makedirs("figures", exist_ok=True)
-from wksdflow.targets import gaussian_targetimport os
+from wksdflow.targets import gaussian_targetimport
 from wksdflow.kernels import make_kernel_bundle, gaussian
 from wksdflow.resolvent import make_collocation_solver
 from wksdflow.flows import generator_velocity, wasserstein_velocity, integrate
