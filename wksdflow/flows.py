@@ -1,57 +1,69 @@
+"""Velocity fields and the explicit Euler integrator of Theorem (end to end)."""
 import jax, jax.numpy as jnp
 from .kernels import pairwise
 jax.config.update("jax_enable_x64", True)
 
+
 def wksd_residual(K_pi, Xp):
-    """h_i = (1/N) sum_j k_pi(X_i, X_j)."""
+    """h_i = (1/N) sum_j k_pi(X_i, X_j), the stationarity residual at particles."""
     return jnp.mean(K_pi(Xp, Xp), axis=1)
 
-def wasserstein_velocity(dK_pi):
-    """v = -g_mu = -2 grad h_mu, the Wasserstein flow of the same objective."""
+
+def generator_velocity(bundle, psi_grad):
+    """v = -2 grad Psi with (-L + alpha) Psi = h_mu, i.e. Algorithm 2."""
+    K_pi = bundle["K_pi"]
+
+    @jax.jit
+    def v(Xp):
+        return -2.0 * psi_grad(Xp, wksd_residual(K_pi, Xp))
+    return v
+
+
+def generator_velocity_stochastic(bundle, psi_grad_sg):
+    """Same field with the semigroup estimator, which needs a PRNG key."""
+    @jax.jit
+    def v(Xp, key):
+        return -2.0 * psi_grad_sg(Xp, key)
+    return v
+
+
+def wasserstein_velocity(bundle):
+    """v = -g_mu = -2 grad h_mu, kernel Stein discrepancy descent."""
+    dK_pi = bundle["dK_pi"]
+
     @jax.jit
     def v(Xp):
         return -2.0 * jnp.mean(dK_pi(Xp, Xp), axis=1)
     return v
 
-def svgd_velocity(k, grad_V, eps):
-    """phi(x_i) = (1/N) sum_j [ k(x_j,x_i) s(x_j) + grad_{x_j} k(x_j,x_i) ].
-    With k symmetric, grad_{x_j} k(x_j,x_i) = (grad_2 k)(x_i,x_j), so the
-    repulsion is a sum over the SECOND index of dK."""
-    K = jax.jit(pairwise(k))
-    dK = jax.jit(pairwise(jax.grad(k, argnums=1)))
+
+def two_kernel_velocity(bundle, r):
+    """v(x) = -(1/N) sum_j r(x, X_j) g_mu(X_j), the RKHS geometry of
+    Definition (two kernel geometry) with geometry kernel r."""
+    dK_pi = bundle["dK_pi"]
+    R = jax.jit(pairwise(r))
 
     @jax.jit
     def v(Xp):
-        s = -jax.vmap(grad_V)(Xp) / eps ** 2
-        return (K(Xp, Xp) @ s + jnp.sum(dK(Xp, Xp), axis=1)) / Xp.shape[0]
+        G = 2.0 * jnp.mean(dK_pi(Xp, Xp), axis=1)
+        return -R(Xp, Xp) @ G / Xp.shape[0]
     return v
 
-def langevin_velocity(grad_V, eps, dt):
-    """Euler-Maruyama written as a stochastic velocity, so that the caller can
-    use the same integrator. `dt` MUST equal the step size passed to integrate."""
-    def v(Xp, key):
-        z = jax.random.normal(key, Xp.shape)
-        return -jax.vmap(grad_V)(Xp) + jnp.sqrt(2.0 / dt) * eps * z
-    return jax.jit(v)
 
-def integrate(v, X0, eta, n_steps, key=None, monitor=None, callback=None,
-              stochastic=False):
-    """Explicit Euler, the update analyzed in the end-to-end theorem. If
-    `monitor` is given it is called as monitor(X) and must return the objective,
-    and the configuration achieving the smallest monitored value is returned as
-    well, this being the quantity the end-to-end bound controls."""
+def integrate(v, X0, eta, n_steps, key=None, callback=None, stochastic=False):
+    """Explicit Euler, the update analyzed in Theorem (end to end).
+
+    Returns (X_final, hist), where hist collects callback(n, X) after each step.
+    The best-iterate quantity of the theorem is min over hist of the recorded
+    objective. If `stochastic` is True then v is called as v(X, subkey).
+    """
     X, hist = X0, []
-    best_val, best_X, best_n = jnp.inf, X0, 0
     for n in range(n_steps):
         if stochastic:
             key, sub = jax.random.split(key)
             X = X + eta * v(X, sub)
         else:
             X = X + eta * v(X)
-        if monitor is not None:
-            val = float(monitor(X))
-            if val < best_val:
-                best_val, best_X, best_n = val, X, n + 1
         if callback is not None:
             hist.append(callback(n, X))
-    return X, hist, (best_X, best_val, best_n)
+    return X, hist
