@@ -14,12 +14,16 @@ from wksdflow.kernels import make_kernel_bundle, gaussian
 from wksdflow.resolvent import make_collocation_solver
 from wksdflow.flows import generator_velocity, wasserstein_velocity, integrate
 from wksdflow.metrics import energy_U, kl_gaussian
+from wksdflow.config import Config
+cfg = Config.from_cli(dim=1, n=200, eps=1.0, scale=1.0,
+                      alpha=1e-3, gamma=1e-8, eta=5e-2, n_steps=4000,
+                      base="matern72")
 
-DIM, N, EPS, SCALE = 1, 200, 1.0, 1.0
-ALPHA, GAMMA, ETA, NSTEPS = 1e-3, 1e-8, 5e-2, 4000
+DIM, N, EPS, SCALE = cfg.dim, cfg.n, cfg.eps, cfg.scale
+ALPHA, GAMMA, ETA, NSTEPS = cfg.alpha, cfg.gamma, cfg.eta, cfg.n_steps
 
 tgt = gaussian_target(DIM, EPS, SCALE)
-bundle = make_kernel_bundle("imq", s=0.0, base_kwargs={"ell": 1.0},
+bundle = make_kernel_bundle(cfg.base, s=cfg.s, base_kwargs=cfg.kernel_kwargs(),
                             grad_V=tgt.grad_V, eps=EPS)
 psi_grad = make_collocation_solver(lambda x, y: gaussian(x, y, 1.0),
                                    tgt.grad_V, EPS, ALPHA, GAMMA)
@@ -52,4 +56,4 @@ for name, v in [("generator", generator_velocity(bundle, psi_grad)),
     ax[2].loglog(t[1:], J[1:], label="J(mu_t)")
     ax[2].loglog(t[1:], J[1] * t[1] / t[1:], "--", label="slope -1")
     ax[2].legend(); ax[2].set_xlabel("t")
-    fig.tight_layout(); fig.savefig(f"figures/exp1_{name}.pdf")
+    fig.tight_layout(); fig.savefig(cfg.path(f"exp1_{name}"))
