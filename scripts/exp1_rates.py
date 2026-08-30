@@ -15,6 +15,7 @@ from wksdflow.resolvent import make_collocation_solver
 from wksdflow.flows import generator_velocity, wasserstein_velocity, integrate
 from wksdflow.metrics import energy_U, kl_gaussian
 from wksdflow.config import Config
+from wksdflow.diagnostics import report_step_size, collocation_diagnostics
 cfg = Config.from_cli(dim=1, n=200, eps=1.0, scale=1.0,
                       alpha=1e-3, gamma=1e-8, eta=5e-2, n_steps=4000,
                       base="matern72")
