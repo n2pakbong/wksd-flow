@@ -5,6 +5,8 @@ log-log axes, and the plateau is reached at time O(alpha^{-2})
 [Theorem kl_dissipation_regularized].
 """
 import jax, numpy as np, matplotlib.pyplot as plt
+import os
+os.makedirs("figures", exist_ok=True)
 from wksdflow.targets import mixture_target
 from wksdflow.kernels import make_kernel_bundle, gaussian
 from wksdflow.resolvent import make_collocation_solver
@@ -13,8 +15,9 @@ from wksdflow.metrics import energy_U
 
 DIM, N, EPS = 2, 300, 0.7
 tgt = mixture_target(DIM, EPS, sep=2.0)
-bundle = make_kernel_bundle("matern72", s=2.0, base_kwargs={"ell": 1.0},
+bundle = make_kernel_bundle("imq", s=2.0, base_kwargs={"ell": 1.0},
                             grad_V=tgt.grad_V, eps=EPS)
+print("rho =", tgt.rho, " admissible alphas need alpha > ", -2 * tgt.rho)
 
 alphas = np.logspace(-2.5, 0.5, 7)
 plateaus = []
