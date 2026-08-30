@@ -46,12 +46,12 @@ E_pi[k_pi(X,y)] = 0) with and without float64. Expect ~1e-10 vs ~1e-3. That
 comparison, not an assertion, is the reason for float64.
 
 ## Run order
-python -m pytest -q tests/test_stein_identity.py # correctness gate
-python scripts/check_delta.py --base matern72 # only if using Matern
-python exp1_rates.py --n 32 --n-steps 100 --tag _smoke
-python exp2_floor.py --n 32 --n-steps 200 --n-alpha 3 --tag _smoke
-python exp3_compare.py --n-list 32 --n-steps 100 --tag _smoke
-python exp1_rates.py ; python exp2_floor.py ; python exp3_compare.py
+python -m pytest -q tests/test_stein_identity.py # correctness gate  
+python scripts/check_delta.py --base matern72 # only if using Matern  
+python scripts/exp1_rates.py --n 32 --n-steps 100 --tag _smoke  
+python scripts/exp2_floor.py --n 32 --n-steps 200 --n-alpha 3 --tag _smoke  
+python scripts/exp3_compare.py --n-list 32 --n-steps 100 --tag _smoke  
+python scripts/exp1_rates.py ; python scripts/exp2_floor.py ; python scripts/exp3_compare.py  
 
 Cost: per step, one NxN matrix of k_pi (fourth-order autodiff per entry) plus one
 dense non-symmetric NxN solve. Doubling N: x4 on the first, x8 on the second.
