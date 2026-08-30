@@ -38,6 +38,7 @@ for name, v in [("generator", generator_velocity(bundle, psi_grad)),
     def cb(n, X):
         return (n * ETA, float(energy_U(bundle["K_pi"], X)),
                 float(kl_gaussian(X, EPS, SCALE)))
+    if cfg.diag: report_step_size(name, v, X0, ETA)
     _, hist = integrate(v, X0, ETA, NSTEPS, callback=cb)
     t, J, KL = map(np.array, zip(*hist))
 
