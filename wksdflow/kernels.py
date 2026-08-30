@@ -27,8 +27,37 @@ def rq(x, y, ell=1.0, a=2.0):
 
 BASE_KERNELS = {"gaussian": gaussian, "imq": imq, "rq": rq}
 
-_RADIAL_UNSUPPORTED = ("matern12", "matern32", "matern52", "matern72",
-                       "matern92", "exponential", "wendland")
+# --- radial kernels, shifted so that autodiff is safe on the diagonal --------
+# k_delta(x,y) = f(|x-y|^2 + delta). By Schoenberg's theorem f is completely
+# monotone (Matern is PD on every R^d), and complete monotonicity is preserved
+# by shifting the argument, so k_delta is itself a positive definite kernel and
+# a member of the admissible class of Prop. (admissible_class). It is C^infty
+# because its argument is bounded below by delta, which is what makes the fourth
+# derivative k_pi = L_x L_y k evaluable at x = y. The bias relative to the
+# unshifted Matern is O(delta^{3/2}) in the fourth derivatives.
+
+_MATERN_POLY = {
+    2.5: (5.0 ** 0.5, lambda t: 1.0 + t + t ** 2 / 3.0),
+    3.5: (7.0 ** 0.5, lambda t: 1.0 + t + 2.0 * t ** 2 / 5.0
+                                    + t ** 3 / 15.0),
+    4.5: (3.0,        lambda t: 1.0 + t + 3.0 * t ** 2 / 7.0
+                                    + 2.0 * t ** 3 / 21.0 + t ** 4 / 105.0),
+}
+
+
+def matern(x, y, ell=1.0, nu=3.5, delta=1e-6):
+    """Matern with half-integer nu in {2.5, 3.5, 4.5}, shifted by delta."""
+    c, poly = _MATERN_POLY[float(nu)]
+    t = c * jnp.sqrt(jnp.sum((x - y) ** 2) + delta) / ell
+    return poly(t) * jnp.exp(-t)
+
+
+BASE_KERNELS = {
+    "gaussian": gaussian, "imq": imq, "rq": rq,
+    "matern52": lambda x, y, **kw: matern(x, y, nu=2.5, **kw),
+    "matern72": lambda x, y, **kw: matern(x, y, nu=3.5, **kw),
+    "matern92": lambda x, y, **kw: matern(x, y, nu=4.5, **kw),
+}
 
 
 def weighted(kbar, s):
@@ -63,11 +92,6 @@ def make_kernel_bundle(base="imq", s=0.0, base_kwargs=None, grad_V=None,
     K_pi(X,Y)      (N,M) matrix of k_pi
     dK_pi(X,Y)     (N,M,d) array of grad_k_pi
     """
-    if base in _RADIAL_UNSUPPORTED:
-        raise ValueError(
-            f"base kernel '{base}' is written through r = |x-y| and its fourth "
-            "derivative is NaN under autodiff on the diagonal, where the "
-            "V-statistic evaluates k_pi. Use 'imq', 'gaussian' or 'rq'.")
     if grad_V is None:
         raise ValueError("grad_V is required to build k_pi.")
     kbar = lambda x, y: BASE_KERNELS[base](x, y, **(base_kwargs or {}))
