@@ -7,18 +7,19 @@ Predictions tested:
 """
 import jax, jax.numpy as jnp, numpy as np
 import matplotlib.pyplot as plt
-
-from wksdflow.targets import gaussian_target
+import os
+os.makedirs("figures", exist_ok=True)
+from wksdflow.targets import gaussian_targetimport os
 from wksdflow.kernels import make_kernel_bundle, gaussian
 from wksdflow.resolvent import make_collocation_solver
 from wksdflow.flows import generator_velocity, wasserstein_velocity, integrate
 from wksdflow.metrics import energy_U, kl_gaussian
 
 DIM, N, EPS, SCALE = 1, 200, 1.0, 1.0
-ALPHA, GAMMA, ETA, NSTEPS = 1e-3, 1e-6, 5e-2, 4000
+ALPHA, GAMMA, ETA, NSTEPS = 1e-3, 1e-8, 5e-2, 4000
 
 tgt = gaussian_target(DIM, EPS, SCALE)
-bundle = make_kernel_bundle("matern72", s=0.0, base_kwargs={"ell": 1.0},
+bundle = make_kernel_bundle("imq", s=0.0, base_kwargs={"ell": 1.0},
                             grad_V=tgt.grad_V, eps=EPS)
 psi_grad = make_collocation_solver(lambda x, y: gaussian(x, y, 1.0),
                                    tgt.grad_V, EPS, ALPHA, GAMMA)
